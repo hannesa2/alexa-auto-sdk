@@ -5,6 +5,7 @@ buildscript {
     repositories {
         jcenter()
         google()
+        mavenCentral()
     }
     dependencies {
         classpath 'com.android.tools.build:gradle:3.6.2'
@@ -18,10 +19,18 @@ allprojects {
     repositories {
         jcenter()
         google()
+        mavenCentral()
     }
 }
 
 apply plugin: 'com.android.library'
+apply plugin: 'maven-publish'
+apply plugin: 'maven'
+
+def architecture = 'x86-64'
+def packageName = "com.amazon.aace"
+def version = '2.2.0'
+def libraryVersion = version + '-' + architecture
 
 android {
     compileSdkVersion 26
