@@ -1,0 +1,34 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - 'master'
+    tags:
+      - '*'
+  pull_request:
+    branches:
+      - 'master'
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Explain why this job ran
+        run: echo ${{ github.event_name }} ${{ github.ref }} event triggered this step.
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v3
+        with:
+          images: hannesa2/android-ndk
+#      - name: Login to DockerHub
+#        if: github.event_name != 'pull_request'
+#        uses: docker/login-action@v1
+#        with:
+#          username: ${{ secrets.DOCKERHUB_USERNAME }}
+#          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Build
+        run: ./builder/build.sh android -t androidarm64,androidx86-64
+
