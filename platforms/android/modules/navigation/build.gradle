@@ -25,7 +25,6 @@ allprojects {
 
 apply plugin: 'com.android.library'
 apply plugin: 'maven-publish'
-apply plugin: 'maven'
 
 def architecture = 'x86-64'
 def packageName = "com.amazon.aace"
@@ -80,14 +79,25 @@ task sourceJar(type: Jar) {
     classifier "sources"
 }
 
-uploadArchives {
-    repositories {
-        mavenDeployer {
-            repository(url: "https://${betalabs_nexus_url}/repository/maven-releases") {
-                authentication(userName: "${betalabs_nexus_user}", password: "${betalabs_nexus_pw}")
-                pom.groupId = packageName
-                pom.artifactId = project.getName()
-                pom.version = libraryVersion
+// Because the components are created only during the afterEvaluate phase, you must
+// configure your publications using the afterEvaluate() lifecycle method.
+afterEvaluate {
+    publishing {
+        publications {
+            release(MavenPublication) {
+                from components.release
+                groupId = packageName
+                artifactId = project.getName()
+                version = libraryVersion
+            }
+        }
+        repositories {
+            maven {
+                url = layout.buildDirectory.dir("https://${betalabs_nexus_url}/repository/maven-releases")
+                credentials {
+                    username = "${betalabs_nexus_user}"
+                    password = "${betalabs_nexus_pw}"
+                }
             }
         }
     }

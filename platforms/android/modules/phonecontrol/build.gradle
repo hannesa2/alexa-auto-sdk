@@ -25,7 +25,6 @@ allprojects {
 
 apply plugin: 'com.android.library'
 apply plugin: 'maven-publish'
-apply plugin: 'maven'
 
 def architecture = 'x86-64'
 def packageName = "com.amazon.aace"
