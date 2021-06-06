@@ -1,0 +1,45 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - 'master'
+    tags:
+      - '*'
+  pull_request:
+    branches:
+      - 'master'
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Explain why this job ran
+        run: echo ${{ github.event_name }} ${{ github.ref }} event triggered this step.
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v3
+        with:
+          images: hannesa2/android-ndk
+      - name: prepare Linux
+        run: |
+           pwd
+           cd ~
+           pwd
+           git clone git://git.openembedded.org/openembedded-core oe-core -b rocko
+           cd oe-core
+           git clone git://git.openembedded.org/bitbake -b 1.36
+           export OE_CORE_PATH=$(pwd)
+           echo OE_CORE_PATH=$OE_CORE_PATH
+           sudo apt-get install chrpath diffstat gawk texinfo python python3 wget unzip build-essential cpio git-core libssl-dev quilt cmake libsqlite3-dev libarchive-dev python3-dev libdb-dev libpopt-dev zlib1g-dev
+           sudo apt-get install libssl-dev
+      - name: Build
+        run: |
+           export OE_CORE_PATH=/home/runner/oe-core
+           pwd
+           echo OE_CORE_PATH=$OE_CORE_PATH
+           ./builder/build.sh android -t androidarm64,androidx86-64
+      - name: Search artifacts
+        run: find . -name "*.aar"
