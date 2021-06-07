@@ -30,11 +30,11 @@ jobs:
           df -h
       - name: Explain why this job ran
         run: echo ${{ github.event_name }} ${{ github.ref }} event triggered this step.
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@v3
-        with:
-          images: hannesa2/android-ndk
+#      - name: Docker meta
+#        id: meta
+#        uses: docker/metadata-action@v3
+#        with:
+#          images: hannesa2/android-ndk
       - name: prepare Linux
         run: |
            pwd
@@ -58,8 +58,8 @@ jobs:
         run: |
           echo "Free space:"
           df -h
-      - name: Install Android SDK
-        uses: malinskiy/action-android/install-sdk@release/0.1.2
+#      - name: Install Android SDK
+#        uses: malinskiy/action-android/install-sdk@release/0.1.2
       - name: Free space Android
         run: |
           echo "Free space:"
