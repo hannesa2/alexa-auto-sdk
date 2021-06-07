@@ -5,9 +5,10 @@ buildscript {
     repositories {
         jcenter()
         google()
+        mavenCentral()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:3.6.2'
+        classpath 'com.android.tools.build:gradle:4.2.1'
         // NOTE: Do not place your application dependencies here; they belong
         // in the individual module build.gradle files
     }
@@ -17,10 +18,17 @@ allprojects {
     repositories {
         jcenter()
         google()
+        mavenCentral()
     }
 }
 
 apply plugin: 'com.android.library'
+apply plugin: 'maven-publish'
+
+def architecture = 'x86-64'
+def packageName = "com.amazon.aace"
+def version = '2.2.0'
+def libraryVersion = version + '-' + architecture
 
 android {
     compileSdkVersion 26
@@ -62,5 +70,23 @@ android {
     }
     dependencies {
         api project(":core")
+    }
+}
+
+task sourceJar(type: Jar) {
+    from android.sourceSets.main.java.srcDirs
+    classifier "sources"
+}
+
+uploadArchives {
+    repositories {
+        mavenDeployer {
+            repository(url: "https://${betalabs_nexus_url}/repository/maven-releases") {
+                authentication(userName: "${betalabs_nexus_user}", password: "${betalabs_nexus_pw}")
+                pom.groupId = packageName
+                pom.artifactId = project.getName()
+                pom.version = libraryVersion
+            }
+        }
     }
 }

@@ -2,9 +2,10 @@ buildscript {
     repositories {
         jcenter()
         google()
+        mavenCentral()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:3.6.2'
+        classpath 'com.android.tools.build:gradle:4.2.1'
 
         // NOTE: Do not place your application dependencies here; they belong
         // in the individual module build.gradle files
@@ -15,10 +16,17 @@ allprojects {
     repositories {
         jcenter()
         google()
+        mavenCentral()
     }
 }
 
 apply plugin: 'com.android.library'
+apply plugin: 'maven-publish'
+
+def architecture = 'x86-64'
+def packageName = "com.amazon.aace"
+def version = '2.2.0'
+def libraryVersion = version + '-' + architecture
 
 android {
     compileSdkVersion 27
@@ -52,4 +60,33 @@ dependencies {
     androidTestImplementation 'com.android.support.test.espresso:espresso-core:3.0.2'
     testImplementation 'org.mockito:mockito-core:2.15.0'
     testImplementation "org.robolectric:robolectric:3.3.2"
+}
+
+task sourceJar(type: Jar) {
+    from android.sourceSets.main.java.srcDirs
+    classifier "sources"
+}
+
+// Because the components are created only during the afterEvaluate phase, you must
+// configure your publications using the afterEvaluate() lifecycle method.
+afterEvaluate {
+    publishing {
+        publications {
+            release(MavenPublication) {
+                from components.release
+                groupId = packageName
+                artifactId = project.getName()
+                version = libraryVersion
+            }
+        }
+        repositories {
+            maven {
+                url = layout.buildDirectory.dir("https://${betalabs_nexus_url}/repository/maven-releases")
+                credentials {
+                    username = "${betalabs_nexus_user}"
+                    password = "${betalabs_nexus_pw}"
+                }
+            }
+        }
+    }
 }
