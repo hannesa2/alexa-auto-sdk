@@ -48,7 +48,7 @@ install() {
 	fi
 	if [ ! -e ${tmpfile} ]; then
 		note "Downloading file ${filename}"
-		wget https://dl.google.com/android/repository/${filename} -P ${tmpdir}
+		wget https://dl.google.com/android/repository/${filename} -P ${tmpdir} --no-verbose
 		sha1sum ${tmpfile}
 	fi
 	mkdir -p ${dest}
