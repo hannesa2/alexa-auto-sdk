@@ -27,6 +27,8 @@ jobs:
       - name: Free space
         run: |
           echo "Free space:"
+          du /dev/root --max-depth=1 -h
+          ls -la /dev/root
           df -h
       - name: Explain why this job ran
         run: echo ${{ github.event_name }} ${{ github.ref }} event triggered this step.
