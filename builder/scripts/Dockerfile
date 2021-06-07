@@ -11,7 +11,7 @@ ARG AAC_OPENSSL_VERSION
 
 RUN if [ -z $AAC_OPENSSL_VERSION ]; then echo "No openssl version defined in the build command for this dockerfile. Please specify it in AAC_OPENSSL_VERSION. E.g. AAC_OPENSSL_VERSION=1.1.1k"; exit 1; fi \
     && cd /root \
-    && wget https://www.openssl.org/source/openssl-${AAC_OPENSSL_VERSION}.tar.gz || wget https://www.openssl.org/source/old/${AAC_OPENSSL_VERSION:0:5}/openssl-${AAC_OPENSSL_VERSION}.tar.gz \
+    && wget https://www.openssl.org/source/openssl-${AAC_OPENSSL_VERSION}.tar.gz --no-verbose || wget https://www.openssl.org/source/old/${AAC_OPENSSL_VERSION:0:5}/openssl-${AAC_OPENSSL_VERSION}.tar.gz --no-verbose \
     && tar xvzf openssl-${AAC_OPENSSL_VERSION}.tar.gz \
     && cd openssl-${AAC_OPENSSL_VERSION} \
     && ./config -Wl,--enable-new-dtags,-rpath,'$(LIBRPATH)' --prefix=/usr/ --openssldir=/usr/ \
