@@ -23,14 +23,10 @@ allprojects {
     }
 }
 
+apply from: "${project.rootDir}/tag.gradle"
 apply plugin: 'com.android.library'
 apply plugin: 'maven-publish'
 apply plugin: 'maven'
-
-def architecture = 'x86-64'
-def packageName = "com.amazon.aace"
-def version = '2.2.0'
-def libraryVersion = version + '-' + architecture
 
 android {
     compileSdkVersion 26
@@ -38,7 +34,7 @@ android {
         minSdkVersion 22
         targetSdkVersion 23
         versionCode 1
-        versionName '3.2'
+        versionName getTagAll()
         ndk {
             abiFilters = generateAbiFiltersDeploy()
         }
@@ -85,9 +81,9 @@ uploadArchives {
         mavenDeployer {
             repository(url: "https://${betalabs_nexus_url}/repository/maven-releases") {
                 authentication(userName: "${betalabs_nexus_user}", password: "${betalabs_nexus_pw}")
-                pom.groupId = packageName
+                pom.groupId = getGroupId()()
                 pom.artifactId = project.getName()
-                pom.version = libraryVersion
+                pom.version = getTag()
             }
         }
     }
