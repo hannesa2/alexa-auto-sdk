@@ -23,7 +23,18 @@ allprojects {
     }
 }
 
-apply from: "${project.rootDir}/tag.gradle"
+static def getTagAll() {
+    def process = "git describe --tags".execute()
+    def version = process.text.toString().trim().replace("v","")
+    return version
+}
+
+static def getTag() {
+    def process = "git describe --tags --abbrev=0".execute()
+    def version = process.text.toString().trim().replace("v","")
+    return version
+}
+
 apply plugin: 'com.android.library'
 apply plugin: 'maven-publish'
 apply plugin: 'maven'
@@ -81,7 +92,7 @@ uploadArchives {
         mavenDeployer {
             repository(url: "https://${betalabs_nexus_url}/repository/maven-releases") {
                 authentication(userName: "${betalabs_nexus_user}", password: "${betalabs_nexus_pw}")
-                pom.groupId = getGroupId()()
+                pom.groupId = "com.amazon.aace"
                 pom.artifactId = project.getName()
                 pom.version = getTag()
             }
