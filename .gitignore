@@ -9,3 +9,6 @@
 /extras
 compile_commands.json
 tools/builder
+
+.gradle
+
