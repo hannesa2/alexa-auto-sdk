@@ -1,0 +1,69 @@
+From 45c7da4e51a3968da986adca43f9ffa4a9201a5a Mon Sep 17 00:00:00 2001
+From: Madi Juby <madelynj@amazon.com>
+Date: Wed, 21 Apr 2021 12:04:35 -0700
+Subject: [PATCH] Enable Hybrid Router build
+
+---
+ CMakeLists.txt            |  4 ++++
+ build/BuildDefaults.cmake |  2 ++
+ build/cmake/HR.cmake      | 22 +++++++++++++++++++++
+ 3 files changed, 27 insertions(+)
+ create mode 100644 build/cmake/HR.cmake
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index dde47820..e68b0c5b 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -59,5 +59,9 @@ add_subdirectory("Storage")
+ add_subdirectory("SynchronizeStateSender")
+ add_subdirectory("doc")
+ 
++if(ENABLE_HR)
++	add_subdirectory("HybridRouter")
++endif()
++
+ # Create .pc pkg-config file
+ include(build/cmake/GeneratePkgConfig.cmake)
+diff --git a/build/BuildDefaults.cmake b/build/BuildDefaults.cmake
+index ee43f283..b8bced59 100644
+--- a/build/BuildDefaults.cmake
++++ b/build/BuildDefaults.cmake
+@@ -129,3 +129,5 @@ include_once(ExternalMediaPlayerAdapters)
+ 
+ # Setup ducking options.
+ include_once(LocalDucking)
++
++include_once(HR)
+\ No newline at end of file
+diff --git a/build/cmake/HR.cmake b/build/cmake/HR.cmake
+new file mode 100644
+index 00000000..a45ce7f1
+--- /dev/null
++++ b/build/cmake/HR.cmake
+@@ -0,0 +1,22 @@
++#
++# Setup the HR compiler options.
++#
++# To build with HR support, include the following option on the cmake command line.
++#     cmake <path-to-source>
++#       -DENABLE_HR=ON
++#
++option(ENABLE_HR "Enable Hybrid Router (HR)." OFF)
++
++if(ENABLE_HR)
++    message("Creating ${PROJECT_NAME} with HybridRouter support (HR).")
++    add_definitions(-DACSDK_ENABLE_CURL_HTTP_VERSION_2_PRIOR_KNOWLEDGE)
++    add_definitions(-DHYBRID_MESSAGE_ROUTER_ENABLE)
++
++    #-OPENSSL_CRYPTO_LIBRARY=<path-to-openssl-library>
++    #-OPENSSL_INCLUDE_DIRS=<path-to-openssl-include-dir>
++    set(OPENSSL_CRYPTO_LIBRARY ${OPENSSL_CRYPTO_LIBRARY})
++    set(OPENSSL_SSL_LIBRARY ${OPENSSL_SSL_LIBRARY})
++    set(OPENSSL_INCLUDE_DIRS ${OPENSSL_INCLUDE_DIRS})
++    set(WITH_STATIC_SSL 1)
++
++endif()
+\ No newline at end of file
+-- 
+2.28.0
+
