@@ -1,0 +1,6 @@
+Amazon.com Confidential — Do Not Distribute.
+This package is made of up three components, each with its own license.
+1) Pryon Lite: License for this component can be found at “./meta-aac-amazonlite/packages/pryon_lite_1.13.5-alexa-autocore-2019.07.19.1717/LICENSE.txt”.
+2) AVS Device SDK Wrapper: License for this component can be found at “./meta-aac-amazonlite/packages/avs-sdk-adapter-for-wakeword-lite-2.0.0/LICENSE.txt”.
+3) Alexa Auto SDK AmazonLite Extension: License for this component can be found at "./modules/amazonlite/LICENSE”.
+

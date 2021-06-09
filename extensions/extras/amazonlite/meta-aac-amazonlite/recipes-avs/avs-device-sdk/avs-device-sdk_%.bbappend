@@ -1,0 +1,23 @@
+WRAPPER_NAME = "avs-sdk-adapter-for-wakeword-lite"
+WRAPPER_VERSION = "2.0.0"
+
+SRC_URI += "file://${AMAZONLITE_PACKAGES}/${WRAPPER_NAME}-${WRAPPER_VERSION}.tgz"
+
+AMAZONLITE_CPP_MODEL_NAME ?= "model_v4.0.cpp"
+AMAZONLITE_CPP_MODEL_PATH = "${STAGING_DIR_HOST}${datadir}/pryon-lite/models"
+
+AMAZONLITE_CMAKE_OPTIONS = "\
+    -DAMAZONLITE_KEY_WORD_DETECTOR=ON \
+    -DAMAZONLITE_KEY_WORD_DETECTOR_LIB_PATH=${STAGING_DIR_HOST}${libdir}/libpryon_lite.so \
+    -DAMAZONLITE_KEY_WORD_DETECTOR_INCLUDE_DIR=${STAGING_DIR_HOST}${includedir} \
+    -DAMAZONLITE_KEY_WORD_DETECTOR_EMBEDDED_MODEL_CPP_PATH=${AMAZONLITE_CPP_MODEL_PATH}/${AMAZONLITE_CPP_MODEL_NAME} \
+"
+
+PACKAGECONFIG[amazonlite] = "${AMAZONLITE_CMAKE_OPTIONS},,pryon-lite"
+
+# Include AmazonLite by default
+PACKAGECONFIG += "amazonlite"
+
+do_configure_prepend() {
+	${WORKDIR}/${WRAPPER_NAME}/apply_adapter.py ${S}
+}

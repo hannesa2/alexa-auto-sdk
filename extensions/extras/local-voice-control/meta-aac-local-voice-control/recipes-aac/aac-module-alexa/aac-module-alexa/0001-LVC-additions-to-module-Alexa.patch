@@ -1,0 +1,161 @@
+From 5a1f429b61d08126bc10b3c8c1cd7ee1882350f2 Mon Sep 17 00:00:00 2001
+From: Raghavendra Bilamkar <bilamkar@amazon.com>
+Date: Wed, 25 Mar 2020 20:23:31 -0700
+Subject: [PATCH] LVC additions to module Alexa
+
+---
+ .../Alexa/ExternalMediaPlayerEngineImpl.h     | 18 ++++++++++
+ engine/src/AlexaEngineService.cpp             |  4 +--
+ engine/src/DeviceSettingsDelegate.cpp         |  4 +--
+ engine/src/ExternalMediaPlayerEngineImpl.cpp  | 34 +++++++++++++++++++
+ 4 files changed, 56 insertions(+), 4 deletions(-)
+
+diff --git a/engine/include/AACE/Engine/Alexa/ExternalMediaPlayerEngineImpl.h b/engine/include/AACE/Engine/Alexa/ExternalMediaPlayerEngineImpl.h
+index 7685af80..2971299b 100644
+--- a/engine/include/AACE/Engine/Alexa/ExternalMediaPlayerEngineImpl.h
++++ b/engine/include/AACE/Engine/Alexa/ExternalMediaPlayerEngineImpl.h
+@@ -145,6 +145,7 @@ public:
+ 
+     // alexaClientSDK::avsCommon::sdkInterfaces::ConnectionStatusObserverInterface
+     void onConnectionStatusChanged( const Status status, const ChangedReason reason ) override;
++    void onConnectionStatusChangedDetailed( const Status status, const ChangedReason reason, const ConnectionInfo info ) override;
+ 
+     // RenderPlayerInfoCardsObserver interface
+     void setObserver(
+@@ -180,6 +181,15 @@ private:
+      * @c m_playersMutex.
+      */
+     DiscoveredPlayerMap m_pendingDiscoveredPlayerMap;
++    /**
++     * A map of all discovered players, used to rerun the authorization sequence when needed. Key is the player's
++     * localPlayerId and value is its @c DiscoveredPlayerInfo discovery metadata. Access is serialized by
++     * @c m_playersMutex
++     *
++     * note: Although possible to derive the contents of this map whenever it is needed using other info-caching
++     * members of this class, the simplicity is preferable.
++     */
++    DiscoveredPlayerMap m_allDiscoveredPlayersMap;
+     /**
+      * A map of players reported and acknowledged by an AuthorizeDiscoveredPlayers directive. Key is the player's 
+      * localPlayerId and value is @c PlayerInfo metadata including its authorization status. Access is serialized by 
+@@ -190,6 +200,14 @@ private:
+      * The current state of connection to an Alexa endpoint. Access is serialized by @c m_connectionMutex
+      */
+     Status m_connectionStatus = Status::DISCONNECTED;
++     /**
++     * The detailed breakdown of the current connection to an Alexa endpoint. Access is serialized by @c m_connectionMutex
++     */
++    ConnectionInfo m_connectionInfo =
++                        {ConnectionStatusObserverInterface::Status::DISCONNECTED,
++                        ConnectionStatusObserverInterface::ChangedReason::ACL_CLIENT_REQUEST,
++                        ConnectionStatusObserverInterface::Status::DISCONNECTED,
++                        ConnectionStatusObserverInterface::ChangedReason::ACL_CLIENT_REQUEST};
+     /**
+      * Serializes access to @c m_pendingDiscoveredPlayerMap and @c m_authorizationStateMap
+      */
+diff --git a/engine/src/AlexaEngineService.cpp b/engine/src/AlexaEngineService.cpp
+index 259e99d7..4eeb7ad6 100644
+--- a/engine/src/AlexaEngineService.cpp
++++ b/engine/src/AlexaEngineService.cpp
+@@ -1956,7 +1956,7 @@ bool AlexaEngineService::createExternalMediaPlayerImpl()
+         ThrowIfNull( m_externalMediaPlayerEngineImpl, "createExternalMediaPlayerEngineImplFailed" );
+ 
+         // external media player impl needs to observer connection manager connections status
+-        m_connectionManager->addConnectionStatusObserver( m_externalMediaPlayerEngineImpl );
++        m_connectionManager->addConnectionStatusObserverDetailed( m_externalMediaPlayerEngineImpl );
+ 
+         return true;
+     }
+@@ -2051,7 +2051,7 @@ bool AlexaEngineService::registerPlatformInterfaceType( std::shared_ptr<aace::al
+ 
+         // register playback router with the playback router delegate
+         m_playbackRouterDelegate->setDelegate( m_playbackControllerEngineImpl->getPlaybackRouter() );
+-
++    
+         return true;
+     }
+     catch( std::exception& ex ) {
+diff --git a/engine/src/DeviceSettingsDelegate.cpp b/engine/src/DeviceSettingsDelegate.cpp
+index 4bc6c2c9..2d7e0d2f 100644
+--- a/engine/src/DeviceSettingsDelegate.cpp
++++ b/engine/src/DeviceSettingsDelegate.cpp
+@@ -223,7 +223,7 @@ bool DeviceSettingsDelegate::configureLocaleAndWakeWordsSettings(
+         std::get<DeviceSettingsIndex::LOCALE>(m_configurations) = SettingConfiguration<DeviceSettingsIndex::LOCALE>{setting, localeMetadata};
+         std::get<DeviceSettingsIndex::WAKE_WORDS>(m_configurations) = SettingConfiguration<DeviceSettingsIndex::WAKE_WORDS>{setting, wakeWordsMetadata};
+ 
+-        m_connectionManager->addConnectionStatusObserver(setting);
++        m_connectionManager->addConnectionStatusObserverDetailed(setting);
+ 
+         m_deviceSettingsManager->addSetting<DeviceSettingsIndex::LOCALE>(setting);
+         m_deviceSettingsManager->addSetting<DeviceSettingsIndex::WAKE_WORDS>(setting);
+@@ -252,7 +252,7 @@ bool DeviceSettingsDelegate::configureLocaleSetting(
+         ThrowIfNull( setting, "createSettingFailed" );
+ 
+         std::get<DeviceSettingsIndex::LOCALE>(m_configurations) = SettingConfiguration<DeviceSettingsIndex::LOCALE>{setting, localeMetadata};
+-        m_connectionManager->addConnectionStatusObserver(setting);
++        m_connectionManager->addConnectionStatusObserverDetailed(setting);
+ 
+         m_deviceSettingsManager->addSetting<DeviceSettingsIndex::LOCALE>(setting);
+         return true;
+diff --git a/engine/src/ExternalMediaPlayerEngineImpl.cpp b/engine/src/ExternalMediaPlayerEngineImpl.cpp
+index 6e9f0e8a..057ac6d8 100644
+--- a/engine/src/ExternalMediaPlayerEngineImpl.cpp
++++ b/engine/src/ExternalMediaPlayerEngineImpl.cpp
+@@ -548,6 +548,7 @@ void ExternalMediaPlayerEngineImpl::reportDiscoveredPlayers( const std::vector<a
+                 {
+                     AACE_VERBOSE(LX(TAG).m("addingDiscoveredPlayerToPendingMap").d("localPlayerId",next.localPlayerId));
+                     m_pendingDiscoveredPlayerMap[next.localPlayerId] = next;
++                    m_allDiscoveredPlayersMap[next.localPlayerId] = next;
+                 }
+                 else {
+                     AACE_WARN(LX(TAG).d("reason","discoveredPlayerAlreadyPending").d("localPlayerId",next.localPlayerId));
+@@ -690,6 +691,10 @@ void ExternalMediaPlayerEngineImpl::setFocus( const std::string& playerId, bool
+ // alexaClientSDK::avsCommon::sdkInterfaces::ConnectionStatusObserverInterface
+ void ExternalMediaPlayerEngineImpl::onConnectionStatusChanged( const Status status, const ChangedReason reason )
+ {
++    // undefined and unexpected behavior. Only the detailed callback should be invoked.
++    AACE_ERROR(LX(TAG).m("unexpectedConnectionStatusChanged"));
++    return;
++
+     AACE_VERBOSE(LX(TAG).d("status",status));
+ 
+     std::lock_guard<std::mutex> lock( m_connectionMutex );
+@@ -702,6 +707,35 @@ void ExternalMediaPlayerEngineImpl::onConnectionStatusChanged( const Status stat
+     }
+ }
+ 
++// alexaClientSDK::avsCommon::sdkInterfaces::ConnectionStatusObserverInterface
++void ExternalMediaPlayerEngineImpl::onConnectionStatusChangedDetailed(
++    const Status status, const ChangedReason reason, const ConnectionInfo info )
++{
++    AACE_VERBOSE(LX(TAG)
++                .d("status",status)
++                .d("statusAVS",info.statusAVS)
++                .d("reasonAVS",info.reasonAVS)
++                .d("statusAHE",info.statusAHE)
++                .d("reasonAHE",info.reasonAHE));
++
++    std::lock_guard<std::mutex> lock( m_connectionMutex );
++    auto currentStatus = m_connectionStatus;
++    auto currentInfo = m_connectionInfo;
++    m_connectionStatus = status;
++    m_connectionInfo = info;
++
++    bool statusChanged = currentStatus != status;
++    bool avsStatusChanged = currentInfo.statusAVS != info.statusAVS;
++    if( status == Status::CONNECTED && (statusChanged || (statusChanged == false && avsStatusChanged)) ) {
++        // Redo authorization sequence. We either became connected to AVS/AHE when previously not or
++        // our connection switched between AVS and AHE
++         m_executor.submit([this]() {
++            std::lock_guard<std::mutex> lock( m_playersMutex );
++            sendDiscoveredPlayersIfReadyLocked( m_allDiscoveredPlayersMap );
++         });
++     }
++ }
++
+ // alexaClientSDK::avsCommon::utils::RequiresShutdown
+ void ExternalMediaPlayerEngineImpl::doShutdown()
+ {
+-- 
+2.25.0
+

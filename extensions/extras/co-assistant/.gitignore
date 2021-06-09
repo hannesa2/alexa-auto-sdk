@@ -1,0 +1,6 @@
+.repo
+.DS_Store
+platforms/android/modules/co-assistant/build
+platforms/android/modules/co-assistant/.externalNativeBuild
+
+*native-dependencies/

@@ -1,0 +1,81 @@
+From 8d18cae0ae93f035db395a4b6d6eb529847d38a2 Mon Sep 17 00:00:00 2001
+From: Richard Du <duricha@amazon.com>
+Date: Mon, 27 Jan 2020 16:27:20 -0800
+Subject: [PATCH] Remove SetAgent directive from log output
+
+---
+ ACL/src/Transport/HybridProxyMessageRouter.cpp         | 5 +++--
+ ACL/src/Transport/HybridProxyMessageRouterObserver.cpp | 4 +++-
+ ACL/src/Transport/UpChannelHandler.cpp                 | 5 +++--
+ ADSL/src/MessageInterpreter.cpp                        | 4 +++-
+ 4 files changed, 12 insertions(+), 6 deletions(-)
+
+diff --git a/ACL/src/Transport/HybridProxyMessageRouter.cpp b/ACL/src/Transport/HybridProxyMessageRouter.cpp
+index 6f13335..9bdc963 100644
+--- a/ACL/src/Transport/HybridProxyMessageRouter.cpp
++++ b/ACL/src/Transport/HybridProxyMessageRouter.cpp
+@@ -586,12 +586,13 @@ void HybridProxyMessageRouter::receiveExec(
+     const std::string& message,
+     InteractionDestination incomingSource,
+     unsigned int channelId) {
+-    ACSDK_DEBUG9(LX("Receiving message from Observer")
++    if(message.find("SetAgent") == std::string::npos) {
++        ACSDK_DEBUG9(LX("Receiving message from Observer")
+                      .sensitive("contextId", contextId)
+                      .d("message", message)
+                      .d("incomingSource", static_cast<size_t>(incomingSource))
+                      .d("channelId", channelId));
+-
++    }
+     if (mSignalParser.tryParseSignal(message)) {
+         return;
+     }
+diff --git a/ACL/src/Transport/HybridProxyMessageRouterObserver.cpp b/ACL/src/Transport/HybridProxyMessageRouterObserver.cpp
+index feb3309..e47789f 100644
+--- a/ACL/src/Transport/HybridProxyMessageRouterObserver.cpp
++++ b/ACL/src/Transport/HybridProxyMessageRouterObserver.cpp
+@@ -66,7 +66,9 @@ void HybridProxyMessageRouterObserver::receive(
+     const std::string& contextId,
+     const std::string& message,
+     unsigned int messageId) {
+-    ACSDK_DEBUG9(LX("Observer received message").d("Invoking callback with message", message));
++    if(message.find("SetAgent") == std::string::npos) {
++        ACSDK_DEBUG9(LX("Observer received message").d("Invoking callback with message", message));
++    }
+     m_receiveCallback(contextId, message, messageId);
+ }
+ 
+diff --git a/ACL/src/Transport/UpChannelHandler.cpp b/ACL/src/Transport/UpChannelHandler.cpp
+index ecb91dd..bd82377 100644
+--- a/ACL/src/Transport/UpChannelHandler.cpp
++++ b/ACL/src/Transport/UpChannelHandler.cpp
+@@ -226,8 +226,9 @@ bool UpChannelHandler::onReceiveResponseCode(long responseCode) {
+ }
+ 
+ void UpChannelHandler::addMessageToSend(const std::string& jsonMessage, bool isLastMessage) {
+-    ACSDK_DEBUG5(LX(__func__).d("message", jsonMessage));
+-
++    if(jsonMessage.find("SetAgent") == std::string::npos) {
++        ACSDK_DEBUG5(LX(__func__).d("message", jsonMessage));
++    }
+     avsCommon::avs::attachment::InProcessAttachmentWriter::WriteStatus status;
+ 
+     std::string newline = "\r\n";
+diff --git a/ADSL/src/MessageInterpreter.cpp b/ADSL/src/MessageInterpreter.cpp
+index 3ead80c..237f549 100644
+--- a/ADSL/src/MessageInterpreter.cpp
++++ b/ADSL/src/MessageInterpreter.cpp
+@@ -50,7 +50,9 @@ MessageInterpreter::MessageInterpreter(
+ 
+ void MessageInterpreter::receive(const std::string& contextId, const std::string& message) {
+     //----
+-    ACSDK_DEBUG(LX("---JSON DIRECTIVE ----\n").d("\ncontext id", contextId).d("\nmessage\n", message));
++    if(message.find("SetAgent") == std::string::npos) {
++        ACSDK_DEBUG(LX("---JSON DIRECTIVE ----\n").d("\ncontext id", contextId).d("\nmessage\n", message));
++    }
+     //----
+ 
+     auto createResult = AVSDirective::create(message, m_attachmentManager, contextId);
+-- 
+2.23.0
+

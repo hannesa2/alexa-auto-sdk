@@ -1,0 +1,13 @@
+{
+    "aace.localVoiceControl": {
+        "controllerSocketDirectory"    : "/opt/LVC/data/ipc",
+        "controllerSocketPermissions"  : "OWNER",
+        "platformSocketDirectory"      : "/opt/LVC/data/ipc",
+        "platformSocketPermissions"    : "OWNER",
+        "address"                      : "127.0.0.1",
+        "messageRouterSocketDirectory" : "/opt/LVC/data/ipc"
+    },
+    "aace.localSkillService": {
+        "lssSocketPath": "/opt/AAC/data/lss.socket"
+    }
+}

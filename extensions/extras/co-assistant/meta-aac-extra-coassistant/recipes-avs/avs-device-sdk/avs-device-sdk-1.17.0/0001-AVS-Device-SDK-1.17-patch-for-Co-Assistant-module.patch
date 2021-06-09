@@ -1,0 +1,513 @@
+From f2f8a94f79a491ec85b5ca11d136a35bf25f6455 Mon Sep 17 00:00:00 2001
+From: Richard Du <duricha@amazon.com>
+Date: Mon, 27 Jan 2020 17:32:54 -0800
+Subject: [PATCH] AVS Device SDK 1.17 patch for Co-Assistant module
+
+---
+ ADSL/include/ADSL/DirectiveProcessor.h        | 20 ++++
+ ADSL/include/ADSL/DirectiveSequencer.h        | 18 ++++
+ ADSL/src/DirectiveProcessor.cpp               | 21 +++++
+ ADSL/src/DirectiveRouter.cpp                  |  5 +-
+ ADSL/src/DirectiveSequencer.cpp               | 94 ++++++++++++++++++-
+ AVSCommon/AVS/src/DialogUXStateAggregator.cpp |  3 +-
+ .../DirectiveSequencerInterface.h             |  2 +
+ .../AIP/include/AIP/AudioInputProcessor.h     | 24 ++++-
+ .../AIP/src/AudioInputProcessor.cpp           | 78 +++++++++++++--
+ 9 files changed, 252 insertions(+), 13 deletions(-)
+
+diff --git a/ADSL/include/ADSL/DirectiveProcessor.h b/ADSL/include/ADSL/DirectiveProcessor.h
+index 424b698..696e4e2 100644
+--- a/ADSL/include/ADSL/DirectiveProcessor.h
++++ b/ADSL/include/ADSL/DirectiveProcessor.h
+@@ -121,6 +121,14 @@ public:
+      */
+     bool enable();
+ 
++
++    /**
++     * CoAssistant, will have a callback from DirectiveSequencer to let it know the completion
++     * of Hand-off TTS.
++     */
++    void notifyOnCompletion(std::shared_ptr<avsCommon::avs::AVSDirective>& directive, 	
++        std::function< void(std::shared_ptr<avsCommon::avs::AVSDirective>&) > completionHandler);
++
+ private:
+     /**
+      * Handle used to identify @c DirectiveProcessor instances referenced by @c DirectiveHandlerResult.
+@@ -269,6 +277,11 @@ private:
+      */
+     void clearDirectiveBeingHandledLocked(const avsCommon::avs::BlockingPolicy policy);
+ 
++    /**
++     * Calls the CoAssistant directive completion handler if there is a registered callback function
++     */
++    void checkCoAssistantDirectiveCompletionHandler(std::shared_ptr<avsCommon::avs::AVSDirective> directive);
++
+     /**
+      * Clear the pointer to the directive being handled.
+      *
+@@ -351,6 +364,13 @@ private:
+      */
+     std::array<std::shared_ptr<avsCommon::avs::AVSDirective>, avsCommon::avs::BlockingPolicy::Medium::COUNT>
+         m_directivesBeingHandled;
++    
++    /**
++     * CoAssistant
++     */
++    std::shared_ptr<avsCommon::avs::AVSDirective> m_coassistantDirectiveUnderObservation;
++    std::function< void(std::shared_ptr<avsCommon::avs::AVSDirective>&) > m_CoAssistantDirectiveCompletionHandler;
++
+ };
+ 
+ }  // namespace adsl
+diff --git a/ADSL/include/ADSL/DirectiveSequencer.h b/ADSL/include/ADSL/DirectiveSequencer.h
+index 77e0334..6ba7a02 100644
+--- a/ADSL/include/ADSL/DirectiveSequencer.h
++++ b/ADSL/include/ADSL/DirectiveSequencer.h
+@@ -60,6 +60,8 @@ public:
+ 
+     bool onDirective(std::shared_ptr<avsCommon::avs::AVSDirective> directive) override;
+ 
++    void onCoAssistantDirectiveStatusNotification(std::function< void(bool processing) > handler) override;
++
+     void disable() override;
+ 
+     void enable() override;
+@@ -113,8 +115,24 @@ private:
+     /// Condition variable used to wake m_receivingLoop when waiting.
+     std::condition_variable m_wakeReceivingLoop;
+ 
++    /// CoAssistant handoff speak directive handling processing status handler
++    std::function< void(bool processing) > m_handoffDirectiveProcessingStatusHandler;
++
+     /// Thread to receive directives.
+     std::thread m_receivingThread;
++
++    /// Queue of @c AVSDirectives to hold off for CoAssistant.
++    std::deque<std::shared_ptr<avsCommon::avs::AVSDirective>> m_holdingQueue;
++
++    /// Set of directives by namespace and name that do not need to be blocked by the directive sequencing logic
++    std::set<std::pair<std::string, std::string>> m_directivesNotToBlock;
++
++    /// For keeping track of when to start blocking directives
++    bool m_shouldBlockDirectives;
++
++    /// For keeping track of whether the callback has been set for the handoff speak directive
++    bool m_hasSetTTSCallback;
++
+ };
+ 
+ }  // namespace adsl
+diff --git a/ADSL/src/DirectiveProcessor.cpp b/ADSL/src/DirectiveProcessor.cpp
+index 85acfce..f3d2bda 100644
+--- a/ADSL/src/DirectiveProcessor.cpp
++++ b/ADSL/src/DirectiveProcessor.cpp
+@@ -202,6 +202,25 @@ void DirectiveProcessor::DirectiveHandlerResult::setFailed(const std::string& de
+     it->second->onHandlingFailed(m_directive, description);
+ }
+ 
++// CoAssistant : call from DirectiveSequencer.
++void DirectiveProcessor::notifyOnCompletion(std::shared_ptr<avsCommon::avs::AVSDirective>& directive, 
++    std::function< void(std::shared_ptr<avsCommon::avs::AVSDirective>&) > completionHandler) {
++    std::lock_guard<std::mutex> lock(m_mutex);
++    m_coassistantDirectiveUnderObservation = directive;
++    m_CoAssistantDirectiveCompletionHandler = completionHandler;
++}
++
++void DirectiveProcessor::checkCoAssistantDirectiveCompletionHandler(std::shared_ptr<AVSDirective> directive) {
++    // CoAssistant: If the Hand-off TTS directive reports this
++    if (m_coassistantDirectiveUnderObservation &&
++        (m_coassistantDirectiveUnderObservation->getMessageId() == directive->getMessageId())) {
++        ACSDK_INFO(LX("Notifying that CoAssistant Hand-off directive is processed.").d("messageId",directive->getMessageId()));
++        // Notifying the sequencer to allow others
++        m_CoAssistantDirectiveCompletionHandler(directive);
++        m_coassistantDirectiveUnderObservation = nullptr;
++    }
++}
++
+ void DirectiveProcessor::onHandlingCompleted(std::shared_ptr<AVSDirective> directive) {
+     std::lock_guard<std::mutex> lock(m_mutex);
+     ACSDK_DEBUG(LX("onHandlingCompeted")
+@@ -210,6 +229,7 @@ void DirectiveProcessor::onHandlingCompleted(std::shared_ptr<AVSDirective> direc
+                        m_directiveBeingPreHandled ? m_directiveBeingPreHandled->getMessageId() : "(nullptr)"));
+ 
+     removeDirectiveLocked(directive);
++    checkCoAssistantDirectiveCompletionHandler(directive);
+ }
+ 
+ void DirectiveProcessor::onHandlingFailed(std::shared_ptr<AVSDirective> directive, const std::string& description) {
+@@ -224,6 +244,7 @@ void DirectiveProcessor::onHandlingFailed(std::shared_ptr<AVSDirective> directiv
+ 
+     removeDirectiveLocked(directive);
+     scrubDialogRequestIdLocked(directive->getDialogRequestId());
++    checkCoAssistantDirectiveCompletionHandler(directive);
+ }
+ 
+ void DirectiveProcessor::removeDirectiveLocked(std::shared_ptr<AVSDirective> directive) {
+diff --git a/ADSL/src/DirectiveRouter.cpp b/ADSL/src/DirectiveRouter.cpp
+index d6b37d2..4b7c831 100644
+--- a/ADSL/src/DirectiveRouter.cpp
++++ b/ADSL/src/DirectiveRouter.cpp
+@@ -83,12 +83,15 @@ bool DirectiveRouter::addDirectiveHandler(std::shared_ptr<DirectiveHandlerInterf
+         HandlerAndPolicy handlerAndPolicy(handler, item.second);
+         m_configuration[item.first] = handlerAndPolicy;
+         incrementHandlerReferenceCountLocked(handler);
+-        ACSDK_DEBUG9(LX("addDirectiveHandlers")
++
++        if(item.first.name != "SetAgent") {
++            ACSDK_DEBUG9(LX("addDirectiveHandlers")
+                          .d("action", "added")
+                          .d("namespace", item.first.nameSpace)
+                          .d("name", item.first.name)
+                          .d("handler", handler.get())
+                          .d("policy", item.second));
++        }
+     }
+ 
+     return true;
+diff --git a/ADSL/src/DirectiveSequencer.cpp b/ADSL/src/DirectiveSequencer.cpp
+index 2240f09..19e1cff 100644
+--- a/ADSL/src/DirectiveSequencer.cpp
++++ b/ADSL/src/DirectiveSequencer.cpp
+@@ -87,21 +87,107 @@ bool DirectiveSequencer::onDirective(std::shared_ptr<AVSDirective> directive) {
+                        .d("reason", m_isShuttingDown ? "isShuttingDown" : "disabled"));
+         return false;
+     }
+-    ACSDK_INFO(LX("onDirective").d("directive", directive->getHeaderAsString()));
+-    m_receivingQueue.push_back(directive);
+-    m_wakeReceivingLoop.notify_one();
++
++    if(directive->getName() != "SetAgent") {
++        ACSDK_INFO(LX("onDirective").d("directive", directive->getHeaderAsString()));
++    }
++
++    // Detect handoff directive for directive sequencing
++    if (directive->getName() == "SetAgent") {
++        // block upcoming directives
++        m_shouldBlockDirectives = true;
++        // Notify that handoff speak directive is being processed
++        m_handoffDirectiveProcessingStatusHandler(true);
++        ACSDK_INFO(LX("onDirective").d("CoAssistant | Hand off will start","blocking upcoming directives"));
++    }
++    
++    ACSDK_INFO(LX("onDirective").d("CoAssistant | m_hasSetTTSCallback",m_hasSetTTSCallback));
++    ACSDK_INFO(LX("onDirective").d("CoAssistant | m_shouldBlockDirectives",m_shouldBlockDirectives));
++        
++    // For handoff scenarios, we need to know the completion of the Speak
++    // directive "Hmm, Benson/Alexa?". The sequence of directives received
++    // is Speak->SetAgent->so on. We must always set a callback Speak
++    // directive in case there is a SetAgent directive and other directives
++    // that we need to block and handle afterwards.
++    // For non-handoff scenarios, the holding queue will be empty, so 
++    // always executing the callback will not affect UX.
++    
++    // In general, if we don't have a TTS callback setup, add one to the next Speak directive
++    // SetMute is paired with the Speak directive, so they are executed together
++    // when setting up the callback.
++    if (!m_hasSetTTSCallback && (directive->getName() == "Speak" || directive->getName() == "SetMute")) {
++        // registering a callback with DirectiveProcessor for the Speak directive only
++        if (directive->getName() == "Speak") {
++            ACSDK_INFO(LX("onDirective").d("Setting callback for speak directive", directive->getMessageId()));
++
++            // DirectiveProcessor has the information about when handling of TTS
++            // is complete/failed : onHandlingCompleted, onHandlingFailed
++            m_hasSetTTSCallback = true;
++            m_directiveProcessor->notifyOnCompletion(directive, 
++                [this](std::shared_ptr<avsCommon::avs::AVSDirective>& processedDirective) {
++                    ACSDK_INFO(LX("CoAssistant | callback invoked, Speak directive processing complete").d("messageId", processedDirective->getMessageId()));
++                    std::lock_guard<std::mutex> lock(m_mutex);
++                    // Notify that Handoff speak directive processing is done
++                    if (m_shouldBlockDirectives) m_handoffDirectiveProcessingStatusHandler(false);
++
++                    m_shouldBlockDirectives = false;
++                    m_hasSetTTSCallback = false;
++
++                    // Now process the queue.
++                    ACSDK_INFO(LX("CoAssistant | Directives from holding queue firing now"));
++                    while (!m_holdingQueue.empty()) {
++                        auto heldDirective = m_holdingQueue.front();
++                        ACSDK_INFO(LX("CoAssistant | Directives").d("messageId", heldDirective->getMessageId()).d("\tDirective", heldDirective->getName()));
++                        
++                        m_receivingQueue.push_back(heldDirective);
++                        m_wakeReceivingLoop.notify_one();
++                        m_holdingQueue.pop_front();
++                    }
++                });
++        }
++
++        m_receivingQueue.push_back(directive);
++        m_wakeReceivingLoop.notify_one();
++    // If we have a callback set up already, check if we need to block directives for directive sequencing 
++    } else if (m_shouldBlockDirectives) {
++        // Check if this directive is part of the set of directives 
++        // that we don't want to block and want fire right away.
++        // If not, then add it to the holding queue to be blocked.
++        if (m_directivesNotToBlock.find(std::pair<std::string, std::string>(directive->getNamespace(), directive->getName())) != m_directivesNotToBlock.end()) {
++            m_receivingQueue.push_back(directive);
++            m_wakeReceivingLoop.notify_one();
++        } else {
++            m_holdingQueue.push_back(directive);
++        }
++    } else { // No directive sequencing needed, process the directives as normal
++        m_receivingQueue.push_back(directive);
++        m_wakeReceivingLoop.notify_one();
++    }
++
+     return true;
+ }
+ 
++void DirectiveSequencer::onCoAssistantDirectiveStatusNotification(std::function< void(bool processing) > handler) {
++    std::lock_guard<std::mutex> lock(m_mutex);
++    m_handoffDirectiveProcessingStatusHandler = handler;
++}
++
+ DirectiveSequencer::DirectiveSequencer(
+     std::shared_ptr<avsCommon::sdkInterfaces::ExceptionEncounteredSenderInterface> exceptionSender) :
+         DirectiveSequencerInterface{"DirectiveSequencer"},
+         m_mutex{},
+         m_exceptionSender{exceptionSender},
+         m_isShuttingDown{false},
+-        m_isEnabled{true} {
++        m_isEnabled{true},
++        m_shouldBlockDirectives{false},
++        m_hasSetTTSCallback{false} {
+     m_directiveProcessor = std::make_shared<DirectiveProcessor>(&m_directiveRouter);
+     m_receivingThread = std::thread(&DirectiveSequencer::receivingLoop, this);
++
++    // Adds directives as std::pair that don't need to be blocked by directive sequencing logic. 
++    // Format: namespace, name
++    // TODO: Update logic to use a config file instead of making code changes for adding new cases.
++    m_directivesNotToBlock.emplace("SpeechRecognizer", "SetEndOfSpeechOffset");
+ }
+ 
+ void DirectiveSequencer::doShutdown() {
+diff --git a/AVSCommon/AVS/src/DialogUXStateAggregator.cpp b/AVSCommon/AVS/src/DialogUXStateAggregator.cpp
+index 54d564e..16415f8 100644
+--- a/AVSCommon/AVS/src/DialogUXStateAggregator.cpp
++++ b/AVSCommon/AVS/src/DialogUXStateAggregator.cpp
+@@ -226,7 +226,8 @@ void DialogUXStateAggregator::tryEnterIdleStateOnTimer() {
+ }
+ 
+ void DialogUXStateAggregator::setState(sdkInterfaces::DialogUXStateObserverInterface::DialogUXState newState) {
+-    if (newState == m_currentState) {
++    // Allow SPEAKING state even if current state is SPEAKING state to update the voice chrome for CoAssistant handoff
++    if (newState == m_currentState && newState != DialogUXStateObserverInterface::DialogUXState::SPEAKING) {
+         return;
+     }
+     m_listeningTimeoutTimer.stop();
+diff --git a/AVSCommon/SDKInterfaces/include/AVSCommon/SDKInterfaces/DirectiveSequencerInterface.h b/AVSCommon/SDKInterfaces/include/AVSCommon/SDKInterfaces/DirectiveSequencerInterface.h
+index 5e48299..152c892 100644
+--- a/AVSCommon/SDKInterfaces/include/AVSCommon/SDKInterfaces/DirectiveSequencerInterface.h
++++ b/AVSCommon/SDKInterfaces/include/AVSCommon/SDKInterfaces/DirectiveSequencerInterface.h
+@@ -101,6 +101,8 @@ public:
+ 
+     virtual bool isDialogRequestOnline() = 0;
+ 
++    virtual void onCoAssistantDirectiveStatusNotification(std::function< void(bool processing) > handler) = 0;
++	
+     /**
+      * Sequence the handling of an @c AVSDirective.  The actual handling is done by whichever @c DirectiveHandler
+      * is associated with the most specific routing rule.
+diff --git a/CapabilityAgents/AIP/include/AIP/AudioInputProcessor.h b/CapabilityAgents/AIP/include/AIP/AudioInputProcessor.h
+index 25ae181..64f8942 100644
+--- a/CapabilityAgents/AIP/include/AIP/AudioInputProcessor.h
++++ b/CapabilityAgents/AIP/include/AIP/AudioInputProcessor.h
+@@ -253,6 +253,13 @@ public:
+     std::unordered_set<std::shared_ptr<avsCommon::avs::CapabilityConfiguration>> getCapabilityConfigurations() override;
+     /// @}
+ 
++    // This is for the getting notified when keyword is detected.
++    void onKeyWordDetected(
++        std::string keyword,
++        alexaClientSDK::avsCommon::avs::AudioInputStream::Index beginIndex,
++        alexaClientSDK::avsCommon::avs::AudioInputStream::Index endIndex,
++        std::shared_ptr<const std::vector<char>> KWDMetadata);
++
+     /**
+      * Gets the wake words events metadata.
+      *
+@@ -519,10 +526,13 @@ private:
+     void removeDirective(std::shared_ptr<DirectiveInfo> info);
+ 
+     /// This function sends @c m_request, updates state, and calls @c m_deferredStopCapture if pending.
+-    void sendRequestNow();
++    void sendRequest();
+ 
+     /// @}
+ 
++    // This will actually execute the send request logic.
++    void executeSendRequestNow();
++
+     /**
+      * A helper function to handle the SetWakeWordConfirmation directive.
+      *
+@@ -574,6 +584,11 @@ private:
+     /// The Speech Encoder to encode input stream.
+     std::shared_ptr<speechencoder::SpeechEncoder> m_encoder;
+ 
++    /// Timer which runs in the @c RECOGNIZING state for TAP_TO_TALK and HOLD_TO_TALK
++    /// indicator types. This is to support a feature to call WAKEWORD Indicator if
++    /// wakeword is detected in TAP_TO_TALK and HOLD_TO_TALK cases.
++    avsCommon::utils::timing::Timer m_expectingKeyWordTimer;
++	
+     /**
+      * @name Executor Thread Variables
+      *
+@@ -597,6 +612,13 @@ private:
+      */
+     AudioProvider m_lastAudioProvider;
+ 
++    /**
++     * The last @c Initiator type used in an @c onKeyWordDetected(); will be used for checking if
++     * we are in TAP_TO_TALK or HOLD_TO_TALK recognize event and override that with the WAKEWORD indicator type
++     * event.
++     */
++    Initiator m_lastInitiator;
++
+     /**
+      * The attachment reader which is currently being used to stream audio for a Recognize event.  This pointer is
+      * valid during the @c RECOGNIZING state, and is retained by @c AudioInputProcessor so that it can close the
+diff --git a/CapabilityAgents/AIP/src/AudioInputProcessor.cpp b/CapabilityAgents/AIP/src/AudioInputProcessor.cpp
+index 679c146..10694fe 100644
+--- a/CapabilityAgents/AIP/src/AudioInputProcessor.cpp
++++ b/CapabilityAgents/AIP/src/AudioInputProcessor.cpp
+@@ -146,6 +146,9 @@ static const std::string START_OF_SPEECH_TIMESTAMP_FIELD_NAME = "startOfSpeechTi
+ /// The field name for the end of speech offset, reported in milliseconds, as part of SetEndOfSpeechOffset payload.
+ static const std::string END_OF_SPEECH_OFFSET_FIELD_NAME = "endOfSpeechOffsetInMilliseconds";
+ 
++/// The amount of time spent expecting wakeword during Hold to Talk and Tap to Talk cases.
++static const std::chrono::milliseconds EXPECTING_KEYWORD_TIMEOUT = std::chrono::milliseconds(4000);
++
+ /// The value of the WakeWordConfirmationChanged Event name.
+ static const std::string WAKE_WORD_CONFIRMATION_CHANGED_EVENT_NAME = "WakeWordConfirmationChanged";
+ /// The value of the WakeWordConfirmationReport Event name.
+@@ -604,6 +607,9 @@ bool AudioInputProcessor::executeRecognize(
+     bool falseWakewordDetection =
+         Initiator::WAKEWORD == initiator && begin != INVALID_INDEX && begin >= preroll && end != INVALID_INDEX;
+ 
++    // Store the initiator type
++    m_lastInitiator = initiator;
++
+     // If we will be enabling false wakeword detection, add preroll and build the initiator payload.
+     json::JsonGenerator generator;
+     generator.addMember(TYPE_KEY, initiatorToString(initiator));
+@@ -860,7 +866,7 @@ void AudioInputProcessor::executeOnContextAvailable(const std::string jsonContex
+ 
+     // If we already have focus, there won't be a callback to send the message, so send it now.
+     if (avsCommon::avs::FocusState::FOREGROUND == m_focusState) {
+-        sendRequestNow();
++        sendRequest();
+     }
+ }
+ 
+@@ -890,7 +896,7 @@ void AudioInputProcessor::executeOnFocusChanged(avsCommon::avs::FocusState newFo
+ 
+     // For a focus change to FOREGROUND in the Recognizing state, we may have a message queued up to send.  If we do,
+     // we can safely send it now.
+-    sendRequestNow();
++    sendRequest();
+ }
+ 
+ bool AudioInputProcessor::executeStopCapture(bool stopImmediately, std::shared_ptr<DirectiveInfo> info) {
+@@ -975,6 +981,7 @@ void AudioInputProcessor::executeResetState() {
+     // Irrespective of current state, clean up and go back to idle.
+     ACSDK_DEBUG(LX(__func__));
+     m_expectingSpeechTimer.stop();
++    m_expectingKeyWordTimer.stop();
+     m_precedingExpectSpeechInitiator.reset();
+     if (m_reader) {
+         m_reader->close();
+@@ -1114,8 +1121,31 @@ void AudioInputProcessor::removeDirective(std::shared_ptr<DirectiveInfo> info) {
+     }
+ }
+ 
+-void AudioInputProcessor::sendRequestNow() {
+-    ACSDK_DEBUG(LX(__func__));
++void AudioInputProcessor::sendRequest() {
++    ACSDK_INFO(LX(__func__));
++
++    // Stop any active timers.
++    m_expectingKeyWordTimer.stop();
++
++    if (m_lastInitiator == Initiator::PRESS_AND_HOLD || m_lastInitiator == Initiator::TAP) {
++        // Start the ExpectSpeech timer.
++        if (!m_expectingKeyWordTimer
++            .start(EXPECTING_KEYWORD_TIMEOUT,
++                [this]() {
++                    m_executor.submit([this]() { executeSendRequestNow(); });
++                })
++            .valid()) {
++            ACSDK_ERROR(LX("sendRequest").d("exception", "startTimerFailed"));
++        } else {
++            ACSDK_INFO(LX("sendRequest").d("status", "startTimerSuccessful"));
++        }
++    } else {
++        executeSendRequestNow();
++    }
++}
++
++void AudioInputProcessor::executeSendRequestNow() {
++    ACSDK_DEBUG(LX(__func__).d("Recognizing payload: ", m_recognizePayload));
+ 
+     if (m_recognizeRequest) {
+         ACSDK_METRIC_IDS(TAG, "Recognize", "", "", Metrics::Location::AIP_SEND);
+@@ -1134,18 +1164,54 @@ void AudioInputProcessor::sendRequestNow() {
+     }
+ }
+ 
++void AudioInputProcessor::onKeyWordDetected(std::string keyword, alexaClientSDK::avsCommon::avs::AudioInputStream::Index beginIndex,
++        alexaClientSDK::avsCommon::avs::AudioInputStream::Index endIndex,
++        std::shared_ptr<const std::vector<char>> KWDMetadata) {
++    ACSDK_INFO(LX(__func__));
++
++    // Should already be RECOGNIZING if we get here.
++    if (m_state != ObserverInterface::State::RECOGNIZING) {
++        ACSDK_ERROR(
++            LX("onKeyWordDetected").d("exception", "Not permitted in current state").d("state", m_state));
++        return;
++    }
++
++    if (!m_lastAudioProvider) {
++        ACSDK_ERROR(
++            LX("onKeyWordDetected").d("exception", "Last audio provider is invalid"));
++        return;
++    }
++
++    if (m_expectingKeyWordTimer.isActive() &&
++        (m_lastInitiator == Initiator::PRESS_AND_HOLD || m_lastInitiator == Initiator::TAP)) {
++        // Stop the current timer.
++        m_expectingKeyWordTimer.stop();
++
++        // Recognize with wakeword initiator type.
++        if (!recognize(m_lastAudioProvider, Initiator::WAKEWORD, std::chrono::steady_clock::now(), beginIndex, endIndex, keyword).get()) {
++            ACSDK_ERROR(LX("onKeyWordDetected").d("exception", "Recognize failed."));
++            return;
++        }
++        ACSDK_INFO(
++            LX("onKeyWordDetected").d("status", "New recognize with WAKEWORD indicator"));
++    } else {
++        ACSDK_INFO(
++            LX("onKeyWordDetected").d("status", "Ignored as Initiator is not Press and Hold or Tap"));
++    }
++}
++
+ void AudioInputProcessor::onExceptionReceived(const std::string& exceptionMessage) {
+     ACSDK_ERROR(LX("onExceptionReceived").d("exception", exceptionMessage));
+     resetState();
+ }
+ 
+ void AudioInputProcessor::onSendCompleted(avsCommon::sdkInterfaces::MessageRequestObserverInterface::Status status) {
+-    ACSDK_DEBUG(LX("onSendCompleted").d("status", status));
++    ACSDK_DEBUG5(LX("onSendCompleted").d("status", status));
+ 
+     if (status == avsCommon::sdkInterfaces::MessageRequestObserverInterface::Status::SUCCESS ||
+         status == avsCommon::sdkInterfaces::MessageRequestObserverInterface::Status::PENDING) {
+         // Stop listening from audio input source when the recognize event steam is closed.
+-        ACSDK_DEBUG5(LX("stopCapture").d("reason", "streamClosed"));
++        ACSDK_DEBUG(LX("stopCapture").d("reason", "streamClosed"));
+         stopCapture();
+ 
+         return;
+-- 
+2.23.0
+

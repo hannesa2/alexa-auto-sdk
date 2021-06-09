@@ -1,0 +1,436 @@
+From c4c6e89a257c5563696562acd902291674fdc77f Mon Sep 17 00:00:00 2001
+From: Richard Du <duricha@amazon.com>
+Date: Wed, 1 Apr 2020 15:58:00 -0700
+Subject: [PATCH] AAC patch for Co-Assistant module.
+
+---
+ .../Engine/Alexa/SpeechRecognizerEngineImpl.h |  19 +++
+ engine/include/AACE/Engine/Alexa/UPLService.h |   5 +
+ engine/src/AlexaEngineService.cpp             |   4 +
+ engine/src/SpeechRecognizerEngineImpl.cpp     | 114 ++++++++++++++++--
+ engine/src/UPLService.cpp                     |  43 ++++++-
+ .../include/AACE/Alexa/SpeechRecognizer.h     |  21 ++++
+ platform/src/SpeechRecognizer.cpp             |   3 +
+ 7 files changed, 198 insertions(+), 11 deletions(-)
+
+diff --git a/engine/include/AACE/Engine/Alexa/SpeechRecognizerEngineImpl.h b/engine/include/AACE/Engine/Alexa/SpeechRecognizerEngineImpl.h
+index 2680e441..f55c5f9d 100644
+--- a/engine/include/AACE/Engine/Alexa/SpeechRecognizerEngineImpl.h
++++ b/engine/include/AACE/Engine/Alexa/SpeechRecognizerEngineImpl.h
+@@ -24,6 +24,7 @@
+ #include <AIP/Initiator.h>
+ #include <AVSCommon/AVS/DialogUXStateAggregator.h>
+ #include <AVSCommon/SDKInterfaces/AudioInputProcessorObserverInterface.h>
++#include <AVSCommon/SDKInterfaces/AuthObserverInterface.h>
+ 
+ #include <AVSCommon/SDKInterfaces/CapabilitiesDelegateInterface.h>
+ #include <AVSCommon/SDKInterfaces/DirectiveSequencerInterface.h>
+@@ -56,6 +57,7 @@ namespace alexa {
+ class SpeechRecognizerEngineImpl :
+     public aace::alexa::SpeechRecognizerEngineInterface,
+     public alexaClientSDK::avsCommon::sdkInterfaces::AudioInputProcessorObserverInterface,
++    public alexaClientSDK::avsCommon::sdkInterfaces::AuthObserverInterface,
+     public alexaClientSDK::avsCommon::sdkInterfaces::KeyWordObserverInterface,
+     public alexaClientSDK::avsCommon::sdkInterfaces::ConnectionStatusObserverInterface,
+     public alexaClientSDK::avsCommon::utils::RequiresShutdown,
+@@ -119,6 +121,9 @@ public:
+     // AudioInputProcessorObserverInterface
+     void onStateChanged( alexaClientSDK::avsCommon::sdkInterfaces::AudioInputProcessorObserverInterface::State state ) override;
+ 
++    // AuthObserverInterface
++    void onAuthStateChange( alexaClientSDK::avsCommon::sdkInterfaces::AuthObserverInterface::State state, alexaClientSDK::avsCommon::sdkInterfaces::AuthObserverInterface::Error error ) override;
++
+     // KeyWordObserverInterface
+     void onKeyWordDetected(
+         std::shared_ptr<alexaClientSDK::avsCommon::avs::AudioInputStream> stream,
+@@ -130,10 +135,14 @@ public:
+     // Observers states for notifying the wakeword
+     void addObserver( std::shared_ptr<WakewordObserverInterface> observer );
+     void removeObserver( std::shared_ptr<WakewordObserverInterface> observer );
++    void notifyObservers( const std::string& keyword);
+ 
+     // ConnectionStatusObserverInterface
+     void onConnectionStatusChanged( const alexaClientSDK::avsCommon::sdkInterfaces::ConnectionStatusObserverInterface::Status status, const alexaClientSDK::avsCommon::sdkInterfaces::ConnectionStatusObserverInterface::ChangedReason reason ) override;
+ 
++    // CoAssistant Handoff
++    void handleHandOffProcessingUpdates();
++
+ protected:
+     virtual void doShutdown() override;
+ 
+@@ -154,6 +163,11 @@ private:
+     bool isExpectingAudio();
+     ssize_t write( const int16_t* data, const size_t size );
+ 
++    // Internal functions help differentiate whether wakeword was enabled/disabled
++    // by an external function call or internal function call.
++    bool enableWakewordDetectionInternal();
++    bool disableWakewordDetectionInternal();
++
+ private:
+     std::shared_ptr<aace::alexa::SpeechRecognizer> m_speechRecognizerPlatformInterface;
+     std::shared_ptr<alexaClientSDK::capabilityAgents::aip::AudioInputProcessor> m_audioInputProcessor;
+@@ -171,6 +185,8 @@ private:
+     //bool m_expectingAudio = false;
+     bool m_wakewordEnabled = false;
+     bool m_initialWakewordEnabledState = true;
++    bool m_wakewordExternalChange = false;
++    bool m_monitorWakewordState = false; 
+ 
+     std::shared_ptr<aace::engine::alexa::WakewordVerifier> m_wakewordVerifier;
+     alexaClientSDK::avsCommon::utils::threading::Executor m_executor;
+@@ -178,6 +194,9 @@ private:
+     // the aip state
+     AudioInputProcessorObserverInterface::State m_state;
+     
++    // auth state
++    AuthObserverInterface::State m_authState;
++
+     // mutex for blocking
+     std::mutex m_expectingAudioMutex;
+     std::condition_variable m_expectingAudioState_cv;
+diff --git a/engine/include/AACE/Engine/Alexa/UPLService.h b/engine/include/AACE/Engine/Alexa/UPLService.h
+index d38a2cb9..3bdb979d 100644
+--- a/engine/include/AACE/Engine/Alexa/UPLService.h
++++ b/engine/include/AACE/Engine/Alexa/UPLService.h
+@@ -102,6 +102,11 @@ private:
+      */
+     double getCurrentTimeInMs();
+ 
++    /**
++     * DialogState to String
++     */
++    std::string dialogStateToString(DialogState state);
++
+     /// Dialog id of current directive being processed by AVS.
+     std::string m_dialogId;
+ 
+diff --git a/engine/src/AlexaEngineService.cpp b/engine/src/AlexaEngineService.cpp
+index 2270f53c..077de734 100644
+--- a/engine/src/AlexaEngineService.cpp
++++ b/engine/src/AlexaEngineService.cpp
+@@ -792,6 +792,7 @@ bool AlexaEngineService::shutdown()
+ 
+         if ( m_authDelegateRouter != nullptr ) {
+             m_authDelegateRouter->removeAuthObserver( m_alexaClientEngineImpl );
++            m_authDelegateRouter->removeAuthObserver( m_speechRecognizerEngineImpl );
+             m_authDelegateRouter->removeAuthObserver( shared_from_this() );
+             m_authDelegateRouter->removeAuthObserver( m_clientObserver );
+             m_authDelegateRouter->setAuthDelegate( nullptr );
+@@ -1704,6 +1705,9 @@ bool AlexaEngineService::registerPlatformInterfaceType( std::shared_ptr<aace::al
+         m_connectionManager->addConnectionStatusObserver( m_speechRecognizerEngineImpl );
+         m_deviceSettingsDelegate->getDeviceSettingsManager()->addObserver<DeviceSettingsDelegate::DeviceSettingsIndex::LOCALE>(shared_from_this());
+ 
++     	// Add as auth observer
++        m_authDelegateRouter->addAuthObserver( m_speechRecognizerEngineImpl );
++
+         return true;
+     }
+     catch( std::exception& ex ) {
+diff --git a/engine/src/SpeechRecognizerEngineImpl.cpp b/engine/src/SpeechRecognizerEngineImpl.cpp
+index fe2ff756..6b927da5 100644
+--- a/engine/src/SpeechRecognizerEngineImpl.cpp
++++ b/engine/src/SpeechRecognizerEngineImpl.cpp
+@@ -46,7 +46,8 @@ SpeechRecognizerEngineImpl::SpeechRecognizerEngineImpl( std::shared_ptr<aace::al
+         m_speechRecognizerPlatformInterface( speechRecognizerPlatformInterface ),
+         m_audioFormat( audioFormat ),
+         m_wordSize( audioFormat.sampleSizeInBits / CHAR_BIT ),
+-        m_state( alexaClientSDK::avsCommon::sdkInterfaces::AudioInputProcessorObserverInterface::State::IDLE ) {
++        m_state( alexaClientSDK::avsCommon::sdkInterfaces::AudioInputProcessorObserverInterface::State::IDLE ),
++        m_authState( alexaClientSDK::avsCommon::sdkInterfaces::AuthObserverInterface::State::UNINITIALIZED ) {
+ }
+ 
+ bool SpeechRecognizerEngineImpl::initialize(
+@@ -353,10 +354,14 @@ bool SpeechRecognizerEngineImpl::onStartCapture( Initiator initiator, uint64_t k
+         switch( initiator )
+         {
+             case Initiator::HOLD_TO_TALK:
++                AACE_INFO(LX(TAG,"HOLD TO TALK"));
++                handleHandOffProcessingUpdates();
+                 audioProvider = std::make_shared<alexaClientSDK::capabilityAgents::aip::AudioProvider>( m_audioInputStream, m_audioFormat, alexaClientSDK::capabilityAgents::aip::ASRProfile::CLOSE_TALK, false, true, false );
+                 break;
+                 
+             case Initiator::TAP_TO_TALK:
++                AACE_INFO(LX(TAG,"TAP TO TALK"));
++                handleHandOffProcessingUpdates();
+                 audioProvider = std::make_shared<alexaClientSDK::capabilityAgents::aip::AudioProvider>( m_audioInputStream, m_audioFormat, alexaClientSDK::capabilityAgents::aip::ASRProfile::NEAR_FIELD, true, true, true );
+                 break;
+         
+@@ -420,8 +425,61 @@ void SpeechRecognizerEngineImpl::removeObserver( std::shared_ptr<WakewordObserve
+     m_observers.erase( observer );
+ }
+ 
++void SpeechRecognizerEngineImpl::handleHandOffProcessingUpdates() {
++    m_directiveSequencer->onCoAssistantDirectiveStatusNotification([this](bool processing) {
++        std::lock_guard<std::mutex> lock( m_mutex );
++        AACE_INFO(LX(TAG,"onCoAssistantDirectiveStatusNotification"));
++        if (processing) {
++            m_speechRecognizerPlatformInterface->onCoAssistantHandOffStateChanged(aace::alexa::SpeechRecognizer::CoAssistantHandOffState::STARTED);
++             m_monitorWakewordState = true;
++            AACE_INFO(LX(TAG,"onCoAssistantDirectiveStatusNotification").m("handoff started"));
++
++            // If the wakeword is not enabled, then the wakeword enabled state was changed after the
++            // utterance was received, so a flag is set to prevent handoff from modifying the state. 
++            if(!m_wakewordEnabled) {
++                AACE_INFO(LX(TAG,"onCoAssistantDirectiveStatusNotification").m("wakeword already disabled"));
++                m_wakewordExternalChange = true;
++                return;
++            }
++            disableWakewordDetectionInternal();
++
++        } else {
++            m_speechRecognizerPlatformInterface->onCoAssistantHandOffStateChanged(aace::alexa::SpeechRecognizer::CoAssistantHandOffState::COMPLETED);
++            m_monitorWakewordState = false;
++            AACE_INFO(LX(TAG,"onCoAssistantDirectiveStatusNotification").m("handoff completed").d("m_wakewordExternalChange", m_wakewordExternalChange));
++            
++            // If the wakeword state has been changed externally during handoff scenario, then we will use that state instead of
++            // enabling wakeword after handoff is completed.
++            if (!m_wakewordExternalChange) {
++                AACE_INFO(LX(TAG,"onCoAssistantDirectiveStatusNotification").m("enable wakeword after handoff"));
++                enableWakewordDetectionInternal();
++            }
++            m_wakewordExternalChange = false;
++
++        }
++    });
++}
++
+ void SpeechRecognizerEngineImpl::onKeyWordDetected( std::shared_ptr<alexaClientSDK::avsCommon::avs::AudioInputStream> stream, std::string keyword, alexaClientSDK::avsCommon::avs::AudioInputStream::Index beginIndex, alexaClientSDK::avsCommon::avs::AudioInputStream::Index endIndex, std::shared_ptr<const std::vector<char>> KWDMetadata )
+ {
++    // AUTOHUT-5065: Detect WW in the PTT cases and hit the WW INITIATOR type
++    // to support co-assistant cloud side logic.
++    if( m_state == AudioInputProcessorObserverInterface::State::RECOGNIZING ) {
++        // Notify the AudioInputProcessor of keyword detection.
++        m_audioInputProcessor->onKeyWordDetected( keyword, beginIndex, endIndex, KWDMetadata);
++        notifyObservers( keyword );
++    }
++
++    // AUTOHUT-5482: Logged out mode. Ignore ALEXA wakeword.
++    if (keyword == "ALEXA" &&
++        m_authState != alexaClientSDK::avsCommon::sdkInterfaces::AuthObserverInterface::State::REFRESHED) {
++        AACE_INFO(LX(TAG,"onKeyWordDetected: ALEXA wakeword detected but not logged in. Ingnoring this utterance"));
++        return;
++    }
++	
++    AACE_INFO(LX(TAG,"handle handoff processing updates"));
++    handleHandOffProcessingUpdates();
++
+     if( m_state == AudioInputProcessorObserverInterface::State::IDLE && m_speechRecognizerPlatformInterface->wakewordDetected( keyword ) ) {
+         m_executor.submit([this, beginIndex, endIndex, keyword] {
+             if (m_wakewordVerifier && m_wakewordVerifier->verify(keyword, VERIFICATION_TIMEOUT)) {
+@@ -429,13 +487,7 @@ void SpeechRecognizerEngineImpl::onKeyWordDetected( std::shared_ptr<alexaClientS
+                 return;
+             }
+ 
+-            // notify observers about the wakeword detected
+-            std::lock_guard<std::mutex> lock( m_mutex );
+-
+-            for( const auto& next : m_observers ) {
+-                next->wakewordDetected( keyword );
+-            }
+-
++            notifyObservers( keyword );
+             onStartCapture( Initiator::WAKEWORD, beginIndex, endIndex, keyword );
+         });
+     }
+@@ -445,6 +497,11 @@ void SpeechRecognizerEngineImpl::onConnectionStatusChanged( const alexaClientSDK
+     m_connectionStatus = static_cast<aace::alexa::AlexaClient::ConnectionStatus>( status );
+ }
+ 
++// AuthObserverInterface
++void SpeechRecognizerEngineImpl::onAuthStateChange( alexaClientSDK::avsCommon::sdkInterfaces::AuthObserverInterface::State state, alexaClientSDK::avsCommon::sdkInterfaces::AuthObserverInterface::Error error ) {
++    m_authState = state;
++}
++
+ bool SpeechRecognizerEngineImpl::startCapture(
+     std::shared_ptr<alexaClientSDK::capabilityAgents::aip::AudioProvider> audioProvider,
+     alexaClientSDK::capabilityAgents::aip::Initiator initiator,
+@@ -484,7 +541,23 @@ bool SpeechRecognizerEngineImpl::isWakewordEnabled() {
+     return m_wakewordEnabled;
+ }
+ 
++// External function called by platform api to enable wakeword
+ bool SpeechRecognizerEngineImpl::enableWakewordDetection()
++{
++    std::lock_guard<std::mutex> lock( m_mutex );
++    AACE_INFO(LX(TAG,"enableWakewordDetectionExternal"));
++
++    if(m_monitorWakewordState) {
++        AACE_INFO(LX(TAG,"enableWakewordDetectionExternal").m("wakeword state changed during handoff"));
++        m_wakewordExternalChange = true;
++    }
++
++    return enableWakewordDetectionInternal();
++}
++
++// Internal function help differentiate whether wakeword was enabled
++// by an external function call or internal function call.
++bool SpeechRecognizerEngineImpl::enableWakewordDetectionInternal()
+ {
+     try
+     {
+@@ -515,7 +588,22 @@ bool SpeechRecognizerEngineImpl::enableWakewordDetection()
+     }
+ }
+ 
++// External function called by platform api to disable wakeword
+ bool SpeechRecognizerEngineImpl::disableWakewordDetection()
++{
++    std::lock_guard<std::mutex> lock( m_mutex );
++    AACE_INFO(LX(TAG,"disableWakewordDetectionExternal"));
++    if(m_monitorWakewordState) {
++        AACE_INFO(LX(TAG,"disableWakewordDetectionExternal").m("wakeword state changed during handoff"));
++        m_wakewordExternalChange = true;
++    }
++
++    return disableWakewordDetectionInternal();
++}
++
++// Internal function help differentiate whether wakeword was disabled
++// by an external function call or internal function call.
++bool SpeechRecognizerEngineImpl::disableWakewordDetectionInternal()
+ {
+     bool success = true;
+ 
+@@ -596,6 +684,16 @@ void SpeechRecognizerEngineImpl::onStateChanged( alexaClientSDK::avsCommon::sdkI
+     }
+ }
+ 
++void SpeechRecognizerEngineImpl::notifyObservers(const std::string& keyword)
++{
++    // notify observers about the wakeword detected
++    std::lock_guard<std::mutex> lock( m_mutex );
++
++    for( const auto& next : m_observers ) {
++        next->wakewordDetected( keyword );
++    }
++}
++
+ } // aace::engine::alexa
+ } // aace::engine
+ } // aace
+diff --git a/engine/src/UPLService.cpp b/engine/src/UPLService.cpp
+index 03b0b913..e1c31ec2 100644
+--- a/engine/src/UPLService.cpp
++++ b/engine/src/UPLService.cpp
+@@ -58,7 +58,7 @@ void UPLService::updateDialogStateForId(const DialogState currentState, const st
+ 
+     //Set online or offline
+     m_isOnline = isOnline;
+-    AACE_DEBUG(LX(TAG, "Setting UPL Metric to online or offline:").d("dialogRequestId", dialogId).d("connection online", isOnline));
++    AACE_DEBUG(LX(TAG, "Setting UPL Metric to online or offline:").d("state", dialogStateToString(currentState)).d("dialogRequestId", dialogId).d("connection online", isOnline));
+ 
+     //Manage state logic based on currentState
+     manageStates(currentState, dialogId);
+@@ -87,8 +87,26 @@ void UPLService::recordUPL() {
+         m_stateToTimeMap.find(DialogState::STOP_CAPTURE) == m_stateToTimeMap.end() ||
+         m_stateToTimeMap.find(DialogState::PLAYBACK_STARTED) == m_stateToTimeMap.end() ||
+         m_stateToTimeMap.find(DialogState::PLAYBACK_FINISHED) == m_stateToTimeMap.end()) {
+-            AACE_CRITICAL(LX(TAG, "One of StartCapture, StopCapture, PlaybackStarted, PlaybackFinished states weren't stored when trying to upload UPL metric:").d("dialogRequestId", m_dialogId).d("connection online", m_isOnline));
+-            return;
++        AACE_CRITICAL(LX(TAG, "One of StartCapture, StopCapture, PlaybackStarted, PlaybackFinished states weren't stored when trying to upload UPL metric:").d("dialogRequestId", m_dialogId).d("connection online", m_isOnline));
++            // Check if we have enough details to log
++        if (m_stateToTimeMap.find(DialogState::PLAYBACK_STARTED) == m_stateToTimeMap.end() &&
++             m_stateToTimeMap.find(DialogState::PLAYBACK_FINISHED) == m_stateToTimeMap.end() &&
++             !m_dialogId.empty()) {
++            double playbackStartedTime = m_stateToTimeMap.at(DialogState::PLAYBACK_STARTED);
++            double playbackFinishedTime = m_stateToTimeMap.at(DialogState::PLAYBACK_FINISHED);
++
++            std::string programName = m_isOnline ? PROGRAM_NAME : PROGRAM_NAME + DELIMITER + OFFLINE_NAME;
++            std::shared_ptr<aace::engine::metrics::MetricEvent> currentMetric =
++            std::shared_ptr<aace::engine::metrics::MetricEvent>(new aace::engine::metrics::MetricEvent(programName, SOURCE_NAME));
++
++            //Add playback start stop metrics.
++            currentMetric->addTimer(PLAYBACK_STARTED_TIME_NAME, playbackStartedTime);
++            currentMetric->addTimer(PLAYBACK_FINISHED_TIME_NAME, playbackFinishedTime);
++            currentMetric->addString(DIALOG_REQUEST_ID_NAME, m_dialogId);
++            currentMetric->record();
++        }
++
++        return;
+     }
+ 
+     //If current state is not Playback Started, return
+@@ -133,6 +151,25 @@ double UPLService::getCurrentTimeInMs() {
+     return duration;
+ }
+ 
++std::string UPLService::dialogStateToString(DialogState state) {
++    switch( state ) {
++        case DialogState::NONE:
++            return "NONE";
++        case DialogState::START_CAPTURE:
++            return "START_CAPTURE";
++        case DialogState::STOP_CAPTURE:
++            return "STOP_CAPTURE";
++        case DialogState::FIRST_BYTE_JSON_RECEIVED:
++            return "FIRST_BYTE_JSON_RECEIVED";
++        case DialogState::PLAYBACK_STARTED:
++            return "PLAYBACK_STARTED";
++        case DialogState::PLAYBACK_FINISHED:
++            return "PLAYBACK_FINISHED";
++        default:
++            return "";
++    }
++}
++
+ }  // alexa
+ }  // engine
+ }  // aace
+\ No newline at end of file
+diff --git a/platform/include/AACE/Alexa/SpeechRecognizer.h b/platform/include/AACE/Alexa/SpeechRecognizer.h
+index 951d5ff2..f47bd380 100644
+--- a/platform/include/AACE/Alexa/SpeechRecognizer.h
++++ b/platform/include/AACE/Alexa/SpeechRecognizer.h
+@@ -41,6 +41,22 @@ protected:
+     SpeechRecognizer( bool wakewordDetectionEnabled = true );
+ 
+ public:
++    /**
++     * Specifies the state of the co-assistant handoff processing
++     */
++    enum class CoAssistantHandOffState {
++
++        /**
++         * Started playing hand off message
++         */
++        STARTED,
++
++        /**
++         * Completed playing hand off message
++         */
++        COMPLETED,
++    };
++
+     virtual ~SpeechRecognizer();
+ 
+     /**
+@@ -151,6 +167,11 @@ public:
+      */
+     virtual void endOfSpeechDetected();
+ 
++    /**
++     * Notify that handoff audio processing state to client.
++     */
++    virtual void onCoAssistantHandOffStateChanged(CoAssistantHandOffState state);
++
+     /**
+      * @internal
+      * Sets the Engine interface delegate
+diff --git a/platform/src/SpeechRecognizer.cpp b/platform/src/SpeechRecognizer.cpp
+index 4dec13d5..5565fa45 100644
+--- a/platform/src/SpeechRecognizer.cpp
++++ b/platform/src/SpeechRecognizer.cpp
+@@ -84,6 +84,9 @@ bool SpeechRecognizer::wakewordDetected( const std::string& wakeword ) {
+ void SpeechRecognizer::endOfSpeechDetected() {
+ }
+ 
++void SpeechRecognizer::onCoAssistantHandOffStateChanged(CoAssistantHandOffState state) {
++}
++
+ void SpeechRecognizer::setEngineInterface( std::shared_ptr<aace::alexa::SpeechRecognizerEngineInterface> speechRecognizerEngineInterface ) {
+     m_speechRecognizerEngineInterface = speechRecognizerEngineInterface;
+ }
+-- 
+2.23.0
+

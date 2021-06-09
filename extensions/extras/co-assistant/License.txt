@@ -1,0 +1,7 @@
+Copyright 2018-2019 Amazon.com, Inc. or its affiliates.  All Rights Reserved. 
+
+These materials are licensed as "Restricted Program Materials" under the Program Materials License Agreement (the "Agreement") in connection with the Alexa Voice Service Program.  The Agreement is available at https://developer.amazon.com/public/support/pml.html.  See the Agreement for the specific terms and conditions of the Agreement.  Capitalized terms not defined in this file have the meanings given to them in the Agreement. 
+
+In addition to the terms and conditions of the Agreement, the following terms and conditions apply to these materials.  In the event of a conflict between the terms and conditions of the Agreement and those of this file, the terms and conditions of this file will apply.
+
+1.  Use of these Restricted Program Materials is for evaluation purposes only. 

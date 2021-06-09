@@ -1,0 +1,125 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "assetId": "My.DriverSeatWarmerId",
+      "values": [
+        {
+          "locales": [
+            "en-US"
+          ],
+          "defaultValue": "Seat",
+          "synonyms": []
+        }
+      ]
+    },
+    {
+      "assetId": "My.DriverSeatWarmerLevelId",
+      "values": [
+        {
+          "locales": [
+            "en-US"
+          ],
+          "defaultValue": "warmer",
+          "synonyms": ["warmer level"]
+        }
+      ]
+    },
+    {
+      "assetId": "My.LowLevelId",
+      "values": [
+        {
+          "locales": [
+            "en-US"
+          ],
+          "defaultValue": "low",
+          "synonyms": ["minimum", "min", "lowest"]
+        }
+      ]
+    },
+    {
+      "assetId": "My.MediumLevelId",
+      "values": [
+        {
+          "locales": [
+            "en-US"
+          ],
+          "defaultValue": "medium",
+          "synonyms": ["mid", "middle"]
+        }
+      ]
+    },
+    {
+      "assetId": "My.HighLevelId",
+      "values": [
+        {
+          "locales": [
+            "en-US"
+          ],
+          "defaultValue": "high",
+          "synonyms": ["highest", "max", "maximum"]
+        }
+      ]
+    },
+    {
+      "assetId": "My.CameraId",
+      "values": [
+        {
+          "locales": [
+            "en-US"
+          ],
+          "defaultValue": "camera",
+          "synonyms": []
+        }
+      ]
+    },
+    {
+      "assetId": "My.CameraViewId",
+      "values": [
+        {
+          "locales": [
+            "en-US"
+          ],
+          "defaultValue": "view",
+          "synonyms": []
+        }
+      ]
+    },
+    {
+      "assetId": "My.Narrow",
+      "values": [
+        {
+          "locales": [
+            "en-US"
+          ],
+          "defaultValue": "narrow",
+          "synonyms": []
+        }
+      ]
+    },
+    {
+      "assetId": "My.Normal",
+      "values": [
+        {
+          "locales": [
+            "en-US"
+          ],
+          "defaultValue": "normal",
+          "synonyms": ["default", "regular"]
+        }
+      ]
+    },
+    {
+      "assetId": "My.Wide",
+      "values": [
+        {
+          "locales": [
+            "en-US"
+          ],
+          "defaultValue": "wide",
+          "synonyms": []
+        }
+      ]
+    }
+  ]
+}
