@@ -58,7 +58,7 @@ jobs:
            sudo apt-get install docker-ce docker-ce-cli containerd.io
       - name: Docker directory
         run: |
-          - cat /etc/default/docker
+          - tail /etc/default/docker
       - name: Free space apt-get
         run: |
           echo "Free space:"
