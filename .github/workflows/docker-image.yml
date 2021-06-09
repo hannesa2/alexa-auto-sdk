@@ -58,12 +58,7 @@ jobs:
            sudo apt-get install docker-ce docker-ce-cli containerd.io
       - name: Docker directory
         run: |
-          - set -x
           - cat /etc/default/docker
-          - sudo echo "DOCKER_OPTS=\"--dns 8.8.8.8 --dns 8.8.4.4 -g /home/runner/work/alexa-auto-sdk/docker\"" >> /etc/default/docker
-          - cat /etc/default/docker
-          - mv /var/lib/docker /home/runner/work/alexa-auto-sdk/docker
-          - ln -s /home/runner/work/alexa-auto-sdk/docker /var/lib/docker
       - name: Free space apt-get
         run: |
           echo "Free space:"
