@@ -5,6 +5,7 @@ buildscript {
     repositories {
         jcenter()
         google()
+        mavenCentral()
     }
     dependencies {
         classpath 'com.android.tools.build:gradle:3.6.2'
@@ -18,10 +19,14 @@ allprojects {
     repositories {
         jcenter()
         google()
+        mavenCentral()
     }
 }
 
+apply from: "${project.rootDir}/tag.gradle"
 apply plugin: 'com.android.library'
+apply plugin: 'maven-publish'
+apply plugin: 'maven'
 
 android {
     compileSdkVersion 26
@@ -29,7 +34,7 @@ android {
         minSdkVersion 22
         targetSdkVersion 23
         versionCode 1
-        versionName '3.2'
+        versionName getTagAll()
         ndk {
             abiFilters = generateAbiFiltersDeploy()
         }
@@ -58,6 +63,24 @@ android {
         main {
             java {
                 srcDirs = ['src/main/java']
+            }
+        }
+    }
+}
+
+task sourceJar(type: Jar) {
+    from android.sourceSets.main.java.srcDirs
+    classifier "sources"
+}
+
+uploadArchives {
+    repositories {
+        mavenDeployer {
+            repository(url: "https://${betalabs_nexus_url}/repository/maven-releases") {
+                authentication(userName: "${betalabs_nexus_user}", password: "${betalabs_nexus_pw}")
+                pom.groupId = getGroupId()()
+                pom.artifactId = project.getName()
+                pom.version = getTag()
             }
         }
     }

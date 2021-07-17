@@ -3,15 +3,34 @@
     "AudioInputProvider": {
       "devices": {
         "default": {
-          "module": "GStreamer"
+          "module": "GStreamer",
+          "card": "plug:smartx:SpeechSink_CF_2MIC_6REF",
+          "rate": 16000
+        },
+        "bmw-mic": {
+          "module": "GStreamer",
+          "card": "plug:smartx:SpeechSink_CF_2MIC_6REF",
+          "rate": 16000
         }
+      },
+      "types": {
+        "VOICE": "bmw-mic"
       }
     },
     "AudioOutputProvider": {
       "devices": {
         "default": {
-          "module": "GStreamer"
+          "module": "GStreamer",
+          "card": "smartx:Nuance_physical_Source_CF_24_MONO"
+        },
+        "Ispeech": {
+          "module": "GStreamer",
+          "card": "smartx:Nuance_physical_Source_CF_24_MONO",
+          "rate": 24000
         }
+      },
+      "types": {
+        "OUTPUT": "Ispeech"
       }
     }
   }

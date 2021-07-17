@@ -1,0 +1,70 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - 'master'
+    tags:
+      - '*'
+  pull_request:
+    branches:
+      - 'master'
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 512
+          swap-size-mb: 1024
+          remove-dotnet: 'true'
+      - name: Clean Docker
+        run: docker system prune -a -f
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Free space
+        run: |
+          echo "Free space:"
+          du /dev/root --max-depth=1 -h
+          ls -la /dev/root
+          df -h
+      - name: Explain why this job ran
+        run: echo ${{ github.event_name }} ${{ github.ref }} event triggered this step.
+#      - name: Docker meta
+#        id: meta
+#        uses: docker/metadata-action@v3
+#        with:
+#          images: hannesa2/android-ndk
+      - name: prepare Linux
+        run: |
+           pwd
+           cd ~
+           pwd
+           ./prepareUbuntu.sh
+      - name: Docker directory
+        run: |
+          - tail /etc/default/docker
+      - name: Free space apt-get
+        run: |
+          echo "Free space:"
+          df -h
+#      - name: Install Android SDK
+#        uses: malinskiy/action-android/install-sdk@release/0.1.2
+      - name: Free space Android
+        run: |
+          echo "Free space:"
+          df -h
+      - name: Build with Docker
+        run: |
+           sudo docker run hello-world
+           export CI_BUILD="CI_BUILD"
+           ./builder/build.sh android -t androidarm64,androidx86-64 --force-docker
+      - name: Free space after
+        if: ${{ always() }}
+        run: |
+          echo "Free space:"
+          df -h
+      - name: Find artifacts
+        run: find . -name "*.aar"
